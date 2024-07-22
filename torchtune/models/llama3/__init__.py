@@ -14,14 +14,17 @@ from ._model_builders import (  # noqa
     lora_llama3_8b,
     qlora_llama3_70b,
     qlora_llama3_8b,
+    llama3_s,
 )
 from ._tokenizer import Llama3Tokenizer
 
 __all__ = [
     "Llama3Tokenizer",
     "llama3",
+    "llam3_s"
     "llama3_8b",
     "llama3_70b",
+    "llama3_s_8b",
     "llama3_tokenizer",
     "lora_llama3",
     "lora_llama3_8b",
