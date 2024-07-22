@@ -286,8 +286,6 @@ class FullFinetuneRecipeDistributed(FTRecipeInterface):
             log.info(
                 f"Model instantiation took {time.perf_counter() - init_start:.2f} secs"
             )
-            model.tok_embeddings = nn.Embedding(129282, 4096)
-            model.output = nn.Linear(4096, 129282, bias=False)
             # Load both the model weights. This should happen only on Rank 0
             model.load_state_dict(model_state_dict)
 

@@ -16,12 +16,10 @@
 # This config works best when the model is being fine-tuned on 2+ GPUs.
 # Single device full finetuning requires more memory optimizations. It's
 # best to use 8B_full_single_device.yaml for those cases
-
-
 # Tokenizer
 tokenizer:
   _component_: torchtune.models.llama3.llama3_tokenizer
-  path: /root/Workspace/torchtune/Model_Zoo/Jan-Llama3-0708/model_zoo/
+  path: ../model_zoo/Jan-Llama3-0708/
 
 # Dataset
 dataset:
@@ -35,7 +33,7 @@ model:
   _component_: torchtune.models.llama3.llama3_s_8B
 checkpointer:
   _component_: torchtune.utils.FullModelHFCheckpointer
-  checkpoint_dir: /root/Workspace/torchtune/Model_Zoo/Jan-Llama3-0708/model_zoo/
+  checkpoint_dir: /model_zoo/Jan-Llama3-0708/
   checkpoint_files: [
     model-00001-of-00004.safetensors,
     model-00002-of-00004.safetensors,
@@ -43,7 +41,7 @@ checkpointer:
     model-00004-of-00004.safetensors,
   ]
   recipe_checkpoint: null
-  output_dir: /root/Workspace/torchtune/Model_Zoo/
+  output_dir: ../model_zoo/
   model_type: LLAMA3
 resume_from_checkpoint: False
 
@@ -76,6 +74,6 @@ dtype: bf16
 metric_logger:
   _component_: torchtune.utils.metric_logging.DiskLogger
   log_dir: ${output_dir}
-output_dir: /root/Workspace/torchtune/Model_Zoo/Llama3-sound-testing/
+output_dir: ../model_zoo/Llama3-sound-log/
 log_every_n_steps: 1
 log_peak_memory_stats: False
