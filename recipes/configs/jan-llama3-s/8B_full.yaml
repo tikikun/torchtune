@@ -50,7 +50,7 @@ batch_size: 2
 epochs: 1
 
 optimizer:
-  _component_: torch.optim.AdamW
+  _component_: torchtune.modules.optimizer.Adam_mini
   lr: 2.5e-5
   foreach: False
 
