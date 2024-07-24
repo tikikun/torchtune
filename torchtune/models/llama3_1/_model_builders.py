@@ -13,26 +13,25 @@ from torchtune.models.llama3._tokenizer import Llama3Tokenizer
 from torchtune.modules.peft import LORA_ATTN_MODULES
 from torchtune.modules.tokenizers import parse_hf_tokenizer_json
 import logging
-
 """
 Model builders build specific instantiations using component builders. For example
 the llama3_1_8b model builder uses the llama3 component builder to create the
 Llama3.1 8B model.
 """
 
-def llama3_1_s_8b(path: str, special_tokens_path: Optional[str] = None) -> TransformerDecoder:
+def llama3_1_s_8b() -> TransformerDecoder:
     """
     Builder for creating a Llama3.1 model initialized w/ the default 8b parameter values.
 
     Returns:
         TransformerDecoder: Instantiation of Llama3.1 8B model
     """
-    special_tokens = parse_hf_tokenizer_json(special_tokens_path) if special_tokens_path is not None else None
-    llama3_s_tokenizer = Llama3Tokenizer(path=path, special_tokens=special_tokens)
-    logging.info(f"Using Llama3 Tokenizer with Vocab size: {llama3_s_tokenizer.vocab_size}")
-    logging.info(f"Numbert added Special Tokens: {len(llama3_s_tokenizer.special_tokens)} with {llama3_s_tokenizer.special_tokens}")
+    # special_tokens = parse_hf_tokenizer_json(special_tokens_path) if special_tokens_path is not None else None
+    # llama3_s_tokenizer = Llama3Tokenizer(path=path, special_tokens=special_tokens)
+    # logging.info(f"Using Llama3 Tokenizer with Vocab size: {llama3_s_tokenizer.vocab_size}")
+    # logging.info(f"Numbert added Special Tokens: {len(llama3_s_tokenizer.special_tokens)} with {llama3_s_tokenizer.special_tokens}")
     return llama3_1(
-        vocab_size=llama3_s_tokenizer.vocab_size,
+        vocab_size=129_282,
         num_layers=32,
         num_heads=32,
         num_kv_heads=8,
