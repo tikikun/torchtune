@@ -111,7 +111,6 @@ class TikTokenBaseTokenizer(BaseTokenizer):
         # Encode each sound token and collect the results
         encoded_tokens = []
         for sound_token in sound_tokens:
-            print(sound_token)
             encoded_token = self.single_encode(f"<|{sound_token}|>")
             encoded_tokens.append(encoded_token)
     

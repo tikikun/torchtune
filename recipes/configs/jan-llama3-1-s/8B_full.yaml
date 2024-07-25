@@ -18,14 +18,14 @@
 # best to use 8B_full_single_device.yaml for those cases
 # Tokenizer
 tokenizer:
-  _component_: torchtune.models.llama3_1.llama3_s_tokenizer
-  path: ../model_zoo/Llama3.1_s_8b_init
+  _component_: torchtune.models.llama3.llama3_tokenizer
+  path: ../model_zoo/tokenizer.model
 
 # Dataset
 dataset:
   _component_: torchtune.datasets.chat_dataset
-  source: jan-hq/instruction-speech-conversation-test
-  conversation_styple: openai
+  source: jan-hq/instruction-speech-conversation-tt
+  conversation_style: openai
   max_seq_len: 4096
   split: train
   train_on_input: True
@@ -68,8 +68,6 @@ lr_scheduler:
 
 loss:
   _component_: torch.nn.CrossEntropyLoss
-max_steps_per_epoch: null
-gradient_accumulation_steps: 1
 
 fsdp:
   cpu_offload: False
