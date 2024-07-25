@@ -7,8 +7,8 @@
 from typing import Dict, List, Optional, Tuple
 
 from torchtune.data import Message, truncate
+from torchtune.modules.tokenizers import ModelTokenizer
 from torchtune.modules.tokenizers import ModelTokenizer, TikTokenBaseTokenizer
-
 
 CL100K_PATTERN = r"""(?i:'s|'t|'re|'ve|'m|'ll|'d)|[^\r\n\p{L}\p{N}]?\p{L}+|\p{N}{1,3}| ?[^\s\p{L}\p{N}]+[\r\n]*|\s*[\r\n]+|\s+(?!\S)|\s+"""  # noqa
 
@@ -29,13 +29,17 @@ SPECIAL_TOKENS = {
 }
 
 NUM_RESERVED_SPECIAL_TOKENS = 256
-
+special_sound_tokens = ["<|sound_start|>", "<|sound_end|>"]
 RESERVED_TOKENS = {
     f"<|reserved_special_token_{2 + i}|>": 128013 + i
     for i in range(NUM_RESERVED_SPECIAL_TOKENS - len(SPECIAL_TOKENS))
 }
+SPECIAL_SOUND_TOKENS = {
+    f"{special_sound_tokens[num]}": 128013 + len(RESERVED_TOKENS) + num
+    for num in range(len(special_sound_tokens))
+}
 
-LLAMA3_SPECIAL_TOKENS = {**SPECIAL_TOKENS, **RESERVED_TOKENS}
+LLAMA3_SPECIAL_TOKENS = {**SPECIAL_TOKENS, **RESERVED_TOKENS, **SPECIAL_SOUND_TOKENS}
 
 
 class Llama3Tokenizer(ModelTokenizer):
@@ -84,6 +88,10 @@ class Llama3Tokenizer(ModelTokenizer):
         # Media tokens
         self.image_id = self.special_tokens["<|image|>"]
 
+        # Sound tokens for interleaved sound-text
+        self.sound_start_id = self.special_tokens["<|sound_start|>"]
+        self.sound_end_id = self.special_tokens["<|sound_end|>"]
+
         # During generation, stop when either eos_id or eot_id is encountered
         self.stop_tokens = [self.eos_id, self.eot_id]
 
@@ -121,6 +129,14 @@ class Llama3Tokenizer(ModelTokenizer):
     @property
     def vocab_size(self) -> int:
         return self.tt_model.vocab_size
+    @property
+    def old_vocab_size(self) -> int:
+        return self.tt_model.old_vocab_size
+
+    def single_encode(self, token: str) -> int:
+        return self.tt_model.single_encode(token)
+    def encode_sound_tokens(self, sound_text: str) -> List[int]:
+        return self.tt_model.encode_sound_tokens(sound_text)
 
     def encode(
         self,
@@ -172,9 +188,14 @@ class Llama3Tokenizer(ModelTokenizer):
         tokenized_body = []
         for item in message.content:
             if item["type"] == "text":
-                tokenized_body += self.encode(
-                    item["content"].strip(), add_bos=False, add_eos=False
-                )
+                if "<|sound_start|>" in item["content"] and "<|sound_end|>" in item["content"]:
+                    tokenized_body += [self.sound_start_id]
+                    tokenized_body += self.tt_model.encode_sound_tokens(item["content"])
+                    tokenized_body += [self.sound_end_id]
+                else:
+                    tokenized_body += self.encode(
+                        item["content"].strip(), add_bos=False, add_eos=False
+                    )
             elif item["type"] == "image":
                 tokenized_body += [self.image_id]
             else:
@@ -248,3 +269,50 @@ class Llama3Tokenizer(ModelTokenizer):
             mask = truncate(mask, max_seq_len, True)
 
         return tokens, mask
+    def encode_sound_text(
+        self,
+        text: str,
+    ) -> List[int]:
+        """
+        Tokenize a list of messages into a list of token ids and masks.
+
+        Args:
+            text : The sound-text interleaved string.
+
+        Returns:
+            Tuple[List[int], List[bool]]: The list of token ids and the list of masks.
+        """
+        tokens = [self.bos_id]
+        # bos and eos are always masked
+
+        # user message
+        user_messages = [self.start_header_id] + self.encode("user".strip(), add_bos=False, add_eos=False) + [self.end_header_id] + self.encode("\n\n", add_bos=False, add_eos=False)
+        tokens = tokens + user_messages
+
+        # sound token between <|sound_start|> and <|sound_end|>
+        chunk = text.split("<|sound_start|>")[1].strip()
+        sound_text = chunk.split("<|sound_end|>")[0].strip()
+        print(f"Sound Text: {sound_text}")
+        sound_tokens_id = self.tt_model.encode_sound_tokens(sound_text)
+        tokens = tokens + sound_tokens_id
+
+        # eot
+        eot = [self.eot_id]
+        tokens = tokens + eot
+    
+
+        # assistant message
+        assistant_messages = [self.start_header_id] + self.encode("assistant".strip(), add_bos=False, add_eos=False) + [self.end_header_id] + self.encode("\n\n", add_bos=False, add_eos=False)
+        tokens = tokens + assistant_messages
+    
+        # text token
+        text_inter = text.split("<|start_header_id|>assistant<|end_header_id|>")[1].strip()
+        print(f"Text Interleaved: {text_inter}")
+        text_tokens_id = self.encode(text)
+        tokens = tokens + text_tokens_id
+    
+        # eot
+        eot = [self.eot_id]
+        tokens = tokens + eot
+
+        return tokens

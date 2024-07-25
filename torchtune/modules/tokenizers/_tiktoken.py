@@ -13,7 +13,7 @@ from torchtune.modules.tokenizers._utils import BaseTokenizer
 # Constants controlling encode logic
 MAX_ENCODE_CHARS = 400_000
 MAX_NO_WHITESPACE_CHARS = 25_000
-
+sound_tokens = [f'<|sound_{num:04d}|>' for num in range(1024)]
 
 class TikTokenBaseTokenizer(BaseTokenizer):
     """
@@ -47,15 +47,29 @@ class TikTokenBaseTokenizer(BaseTokenizer):
         special_tokens: Dict[str, int],
     ):
         mergeable_ranks = load_tiktoken_bpe(path)
+        # print(mergeable_ranks.type)
+        old_vocab_size = len(mergeable_ranks) + len(special_tokens)
+        self.old_vocab_size = old_vocab_size
+        print(f"old_vocab_size: {old_vocab_size}")
+        # add sound tokens to the vocab. 
+        SOUND_TOKENS = {
+            f"{sound_tokens[i]}".encode("utf8"): old_vocab_size + i
+            for i in range(len(sound_tokens))
+        }
+       
+        mergeable_ranks = {**mergeable_ranks, **SOUND_TOKENS}
+            
         self.tt_model = Encoding(
             name=name,
             pat_str=pattern,
             mergeable_ranks=mergeable_ranks,
             special_tokens=special_tokens,
         )
+
         # Vocab size without special tokens
         self.base_vocab_size = len(mergeable_ranks)
         # Vocab size with special tokens
+        
         self.vocab_size = self.tt_model.n_vocab
         self.bos_id = bos_id
         self.eos_id = eos_id
@@ -85,6 +99,25 @@ class TikTokenBaseTokenizer(BaseTokenizer):
                     current_slice_len = 1
         yield s[slice_start:]
 
+    def single_encode(self, token: str) -> int:
+        return self.tt_model.encode_single_token(token)
+    
+    def encode_sound_tokens(self, token: str) -> List[int]:
+        # encode: <|sound_0000|><|sound_0000|> -> [128258, 128258]
+        # Split the input string into individual sound tokens
+        sound_tokens = token.strip().split('|><|')
+        # remove first and last token
+        sound_tokens = sound_tokens[1:-1]
+        # Encode each sound token and collect the results
+        encoded_tokens = []
+        for sound_token in sound_tokens:
+            print(sound_token)
+            encoded_token = self.single_encode(f"<|{sound_token}|>")
+            encoded_tokens.append(encoded_token)
+    
+        return encoded_tokens
+
+    
     def encode(
         self,
         text: str,
@@ -155,3 +188,5 @@ class TikTokenBaseTokenizer(BaseTokenizer):
                 token_ids = token_ids[:k]
         token_ids = [token_id for token_id in token_ids if token_id != self.bos_id]
         return self.tt_model.decode(token_ids)
+
+    

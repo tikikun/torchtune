@@ -23,7 +23,7 @@ tokenizer:
 
 # Dataset
 dataset:
-  _component_: torchtune.datasets.text_completion_dataset
+  _component_: torchtune.datasets.chat_dataset
   source: jan-hq/instruction-speech-text-v1-interleaved
   split: train
 seed: 42
