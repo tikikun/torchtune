@@ -24,8 +24,12 @@ tokenizer:
 # Dataset
 dataset:
   _component_: torchtune.datasets.chat_dataset
-  source: jan-hq/instruction-speech-text-v1-interleaved
+  source: jan-hq/instruction-speech-conversation-test
+  conversation_styple: openai
+  max_seq_len: 4096
   split: train
+  train_on_input: True
+
 seed: 42
 shuffle: True
 # Model Arguments
@@ -47,14 +51,17 @@ checkpointer:
 resume_from_checkpoint: False
 
 # Fine-tuning arguments
-batch_size: 2
+batch_size: 1
 epochs: 1
-
+max_steps_per_epoch: null
+gradient_accumulation_steps: 4
+compile: False
 # Optimizer and Scheduler
 optimizer:
   _component_: torch.optim.AdamW #change this to use adam_mini: torchtune.modules.optimizer.Adam_mini
   weight_decay: 0.01
   lr: 3e-4
+  fused: True
 lr_scheduler:
   _component_: torchtune.modules.get_cosine_schedule_with_warmup
   num_warmup_steps: 100
@@ -69,13 +76,13 @@ fsdp:
 
 # Training env
 device: cuda
+dtype: bf16
 
 # Memory management
 enable_activation_checkpointing: True
 memory_efficient_fsdp_wrap: True
+ac_mode: 'selective'
 
-# Reduced precision
-dtype: bf16
 
 # Logging
 metric_logger:
