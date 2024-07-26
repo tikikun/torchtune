@@ -16,13 +16,12 @@ from omegaconf import DictConfig, ListConfig
 
 from torch import nn
 from torch.distributed import init_process_group
-from torch.distributed.fsdp import (
-    CPUOffload,
-    FullOptimStateDictConfig,
-    FullStateDictConfig,
-    FullyShardedDataParallel as FSDP,
-    StateDictType,
+
+from torch.distributed._composable.fsdp import fully_shard
+from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
+    CheckpointWrapper,
 )
+
 from torch.optim import Optimizer
 from torch.utils.data import DataLoader, DistributedSampler
 
@@ -209,11 +208,8 @@ class FullFinetuneRecipeDistributed(FTRecipeInterface):
         self._model = self._setup_model(
             cfg_model=cfg.model,
             enable_activation_checkpointing=cfg.enable_activation_checkpointing,
-            memory_efficient_fsdp_wrap=cfg.get("memory_efficient_fsdp_wrap", False),
-            fsdp_cpu_offload=cfg.get("fsdp_cpu_offload", False),
             model_state_dict=ckpt_dict[utils.MODEL_KEY],
-            ac_mode=cfg.get("ac_mode", None),
-            ac_option=cfg.get("ac_option", None),
+            cfg_fsdp=cfg.fsdp if hasattr(cfg, "fsdp") else None,
         )
 
         self._tokenizer = config.instantiate(cfg.tokenizer)
@@ -258,100 +254,50 @@ class FullFinetuneRecipeDistributed(FTRecipeInterface):
         self,
         cfg_model: DictConfig,
         enable_activation_checkpointing: bool,
-        memory_efficient_fsdp_wrap: bool,
-        fsdp_cpu_offload: bool,
         model_state_dict: Dict[str, Any],
-        ac_mode: Optional[str] = None,
-        ac_option: Optional[int] = None,
+        cfg_fsdp: Optional[DictConfig] = None,
     ) -> nn.Module:
-        """
-        Model initialization has some important considerations:
-            a. To minimize GPU peak memory, we load the model on CPU with the right
-               dtype. To ensure that we don't instantiate ``world_size`` number of models,
-               we initialize on meta_device for all ranks other than rank 0.
-            b. Rank 0 is also responsible for calling ``load_state_dict`` and loading the
-               model weights from checkpoint.
-            c. While wrapping the model with FSDP, we set ``sync_module_states``
-               to TRUE and broadcast module params and buffers from rank 0.
-            d. The ``device_id`` param ensures that the FSDP initialization happens on
-               the correct device.
-        """
         if self._is_rank_zero:
-            log.info("FSDP is enabled. Instantiating Model on CPU for Rank 0 ...")
+            log.info("FSDP is enabled. Instantiating Model ...")
             init_start = time.perf_counter()
 
-            with utils.set_default_dtype(self._dtype):
-                model = config.instantiate(cfg_model)
-
-            log.info(
-                f"Model instantiation took {time.perf_counter() - init_start:.2f} secs"
-            )
-            # Load both the model weights. This should happen only on Rank 0
-            model.load_state_dict(model_state_dict)
-
-        else:
-            # For non-zero ranks, load the model on meta device
-            with utils.set_default_dtype(self._dtype), torch.device("meta"):
-                model = config.instantiate(cfg_model)
-
-        if self._dtype == torch.bfloat16:
-            model = model.to(torch.bfloat16)
-
-        # We currently have two versions of activation checkpointing in this recipe
-        # for testing and BC purposes. ``enable_activation_checkpointing`` controls
-        # the older version of AC and this behavior is unchanged
-        # ac_mode and ac_option together control selective AC. This is only enabled
-        # when these are set AND ``enable_activation_checkpointing`` is set to False
-        # We'll clean this up as soon as testing of AC is complete
-        ac_mode = ac_mode
-        ac_option = ac_option
-
-        if (not enable_activation_checkpointing) and (ac_mode is not None):
-            apply_selective_activation_checkpointing(
-                model,
-                ac_mode,
-                ac_option,
-            )
-
-        # Wrap the model with FSDP. This will ensure that the model is sharded
-        # across all available GPUs.
-        model = FSDP(
-            module=model,
-            auto_wrap_policy=utils.get_full_finetune_fsdp_wrap_policy(
-                memory_efficient_fsdp_wrap=memory_efficient_fsdp_wrap,
-                modules_to_wrap={modules.TransformerDecoderLayer},
-            ),
-            cpu_offload=CPUOffload(offload_params=fsdp_cpu_offload),
-            sharding_strategy=torch.distributed.fsdp.ShardingStrategy.FULL_SHARD,
-            device_id=self._device,
-            # this recipe does not currently support mixed precision training
-            mixed_precision=None,
-            # Ensure we broadcast params and buffers from rank 0
-            sync_module_states=True,
-            # Initialize empty modules on all non-zero ranks
-            param_init_fn=(
-                lambda module: module.to_empty(
-                    device=torch.device("cuda"), recurse=False
-                )
-                if not self._is_rank_zero
-                else None
-            ),
-        )
-
-        # Ensure no params and buffers are on meta device
-        utils.validate_no_params_on_meta_device(model)
-
-        # original activation checkpointing (full) - flip the condition above
-        if enable_activation_checkpointing and ac_mode is None:
+        with utils.set_default_dtype(self._dtype), torch.device("meta"):
+            model = config.instantiate(cfg_model)
+        
+        if enable_activation_checkpointing:
             utils.set_activation_checkpointing(
                 model, auto_wrap_policy={modules.TransformerDecoderLayer}
             )
 
+        fsdp_kwargs = {}
+        if cfg_fsdp and cfg_fsdp.cpu_offload:
+            from torch.distributed._composable.fsdp import CPUOffloadPolicy
+            fsdp_kwargs["offload_policy"] = CPUOffloadPolicy()
+
+        for m in reversed(list(model.modules())):
+            if isinstance(m, nn.Linear):
+                fully_shard(m, **fsdp_kwargs)
+            if enable_activation_checkpointing:
+                if isinstance(m, CheckpointWrapper):
+                    fully_shard(m, **fsdp_kwargs)
+            else:
+                if isinstance(m, modules.TransformerDecoderLayer):
+                    fully_shard(m, **fsdp_kwargs)
+        fully_shard(model, **fsdp_kwargs)
+
+        missing, unexpected = utils.load_from_full_model_state_dict(
+            model, model_state_dict, self._device, self._is_rank_zero
+        )
+
+        utils.validate_no_params_on_meta_device(model)
+
         if self._is_rank_zero:
+            log.info(
+                f"Model instantiation took {time.perf_counter() - init_start:.2f} secs"
+            )
             memory_stats = utils.get_memory_stats(device=self._device)
             utils.log_memory_stats(memory_stats)
 
-        # synchronize before training begins
         torch.distributed.barrier()
 
         return model
